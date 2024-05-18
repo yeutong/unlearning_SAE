@@ -4,6 +4,9 @@ import torch
 from transformer_lens import HookedTransformer, HookedSAETransformer
 from transformer_lens.utils import test_prompt
 from sae_lens import SparseAutoencoder, ActivationsStore
+from utils import convert_sl_sae_to_tl_sae
+from tqdm import tqdm
+import plotly.express as px
 
 torch.set_grad_enabled(False)
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -67,41 +70,7 @@ with torch.no_grad():
     # px.histogram(l0.flatten().cpu().numpy()).show()
 
 # %%
-
 # see transformer hookedSAE demo: https://colab.research.google.com/github/ckkissane/TransformerLens/blob/hooked-sae-transformer/demos/HookedSAETransformerDemo.ipynb#scrollTo=6CRWdyWxtkWU
-# convert sl sae to tl sae: https://gist.github.com/dtch1997/e31a7dfdad822a12c8e2ddc272a33d24
-
-from transformer_lens import HookedSAEConfig, HookedSAE
-from sae_lens import SparseAutoencoder
-from sae_lens.training.train_sae_on_language_model import LanguageModelSAERunnerConfig
-
-def sl_sae_cfg_to_hooked_sae_cfg(
-    resid_sae_cfg: LanguageModelSAERunnerConfig,
-) -> HookedSAEConfig:
-    new_cfg = {
-        "d_sae": resid_sae_cfg.d_sae,
-        "d_in": resid_sae_cfg.d_in,
-        "hook_name": resid_sae_cfg.hook_point,
-    }
-    return HookedSAEConfig.from_dict(new_cfg)
-
-
-def convert_sl_sae_to_tl_sae(
-    sl_sae: SparseAutoencoder,
-) -> HookedSAE:
-    state_dict = sl_sae.state_dict()
-    # NOTE: sae-lens uses a 'scaling factor'
-    # For now, just check this is 1 and then remove it
-    assert torch.allclose(
-        state_dict["scaling_factor"], torch.ones_like(state_dict["scaling_factor"])
-    ), f"Scaling factor {state_dict['scaling_factor']} was not close to 1" 
-    state_dict.pop("scaling_factor")
-
-    cfg = sl_sae_cfg_to_hooked_sae_cfg(sl_sae.cfg)
-    tl_sae = HookedSAE(cfg)
-    tl_sae.load_state_dict(state_dict)
-    return tl_sae
-# %%
 model_sae = HookedSAETransformer.from_pretrained("gemma-2b")
 hooked_sae = convert_sl_sae_to_tl_sae(sparse_autoencoder)
 
@@ -171,3 +140,58 @@ print(
 
 # %%
 # try to understand HookedSAETransformer
+
+
+def get_tokens(
+    activation_store: ActivationsStore,
+    n_batches_to_sample_from: int = 2**10,
+    n_prompts_to_select: int = 4096 * 6,
+):
+    all_tokens_list = []
+    pbar = tqdm(range(n_batches_to_sample_from))
+    for _ in pbar:
+        batch_tokens = activation_store.get_batch_tokens()
+        batch_tokens = batch_tokens[torch.randperm(batch_tokens.shape[0])][
+            : batch_tokens.shape[0]
+        ]
+        all_tokens_list.append(batch_tokens)
+
+    all_tokens = torch.cat(all_tokens_list, dim=0)
+    all_tokens = all_tokens[torch.randperm(all_tokens.shape[0])]
+    return all_tokens[:n_prompts_to_select]
+
+
+all_tokens = get_tokens(activation_store)  # should take a few minutes
+all_tokens = all_tokens[:300, :30]
+# %%
+from sae_vis.data_config_classes import SaeVisConfig
+from sae_vis.data_storing_fns import SaeVisData
+
+test_feature_idx_gpt = list(range(10)) + [14057]
+
+feature_vis_config_gpt = SaeVisConfig(
+    hook_point=hook_name,
+    features=test_feature_idx_gpt,
+    batch_size=2048,
+    minibatch_size_tokens=128,
+    verbose=True,
+)
+
+sae_vis_data_gpt = SaeVisData.create(
+    encoder=sparse_autoencoder,
+    model=model,
+    tokens=all_tokens,  # type: ignore
+    cfg=feature_vis_config_gpt,
+)
+
+
+# %%
+import os
+import webbrowser
+
+for feature in test_feature_idx_gpt:
+    filename = f"{feature}_feature_vis_demo_gpt.html"
+    sae_vis_data_gpt.save_feature_centric_vis(filename, feature)
+    # webbrowser.open(filename)
+    # install "live server" extension then click "open with live server"
+# %%
