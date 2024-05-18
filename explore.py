@@ -36,8 +36,8 @@ batch_tokens = model.to_tokens(prompts)
 
 for prompt in prompts:
     print("Prompt: ", prompt)
-    print(model.generate(prompt, max_new_tokens=30))
-    print()
+    print(model.generate(prompt, max_new_tokens=30, verbose=False, temperature=0))
+    print('===============')
 # %%
 
 
