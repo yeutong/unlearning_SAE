@@ -1,2 +1,2 @@
-transformer_lens
 git+https://github.com/jbloomAus/SAELens.git
+git+https://github.com/TransformerLensOrg/TransformerLens.git
