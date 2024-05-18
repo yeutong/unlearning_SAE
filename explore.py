@@ -69,7 +69,7 @@ with torch.no_grad():
 # %%
 
 # see transformer hookedSAE demo: https://colab.research.google.com/github/ckkissane/TransformerLens/blob/hooked-sae-transformer/demos/HookedSAETransformerDemo.ipynb#scrollTo=6CRWdyWxtkWU
-# convert sl sae to tl sae
+# convert sl sae to tl sae: https://gist.github.com/dtch1997/e31a7dfdad822a12c8e2ddc272a33d24
 
 from transformer_lens import HookedSAEConfig, HookedSAE
 from sae_lens import SparseAutoencoder
@@ -102,12 +102,72 @@ def convert_sl_sae_to_tl_sae(
     tl_sae.load_state_dict(state_dict)
     return tl_sae
 # %%
+model_sae = HookedSAETransformer.from_pretrained("gemma-2b")
 hooked_sae = convert_sl_sae_to_tl_sae(sparse_autoencoder)
 
 # %%
-model_sae = HookedSAETransformer.from_pretrained("gemma-2b")
-
 with model_sae.saes(saes=[hooked_sae]):
-    print(1)
+    # for prompt in prompts:
+    #     print("Prompt: ", prompt)
+    #     print(model.generate(prompt, max_new_tokens=30))
+    #     print()
+
+
+
+    # tmp_prompt = "Harry Potter’s two best friends are"
+    # test_prompt(
+    #     tmp_prompt,
+    #     " Ron",
+    #     model_sae,
+    #     prepend_space_to_answer=False,
+    # )
+
+    loss = model_sae(tmp_prompt, return_type='loss')
+    print(loss)
+
+# %%
+model_sae(tmp_prompt, return_type='loss')
+
+
+# %%
+logits, cache = model.run_with_cache(tmp_prompt, prepend_bos=True)
+tokens = model.to_tokens(tmp_prompt)
+sae_out, feature_acts, loss, mse_loss, l1_loss, _ = sparse_autoencoder(
+    cache[sparse_autoencoder.cfg.hook_point]
+)
+def reconstr_hook(activations, hook, sae_out):
+    return sae_out
+
+
+def zero_abl_hook(mlp_out, hook):
+    return torch.zeros_like(mlp_out)
+
+
+hook_point = sparse_autoencoder.cfg.hook_point
+
+print("Orig", model(tokens, return_type="loss").item())
+print(
+    "reconstr",
+    model.run_with_hooks(
+        tokens,
+        fwd_hooks=[
+            (
+                hook_point,
+                partial(reconstr_hook, sae_out=sae_out),
+            )
+        ],
+        return_type="loss",
+    ).item(),
+)
+print(
+    "Zero",
+    model.run_with_hooks(
+        tokens,
+        return_type="loss",
+        fwd_hooks=[(hook_point, zero_abl_hook)],
+    ).item(),
+)
+
+
 # %%
 # try to understand HookedSAETransformer
